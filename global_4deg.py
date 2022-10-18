@@ -35,7 +35,10 @@ DATA_SFC = 'era5_198x_sfc_4x4deg_monthly_mean.nc'
 
 import versis
 from versis.flux_atmOcn_atmIce import main as heat_flux
+from versis.flux_atmOcn_atmIce import flux_atmOcn, flux_atmIce
+from versis.utilities import *
 
+testNew = False
 
 class GlobalFourDegreeSetup(VerosSetup):
 
@@ -118,6 +121,7 @@ class GlobalFourDegreeSetup(VerosSetup):
 
         # custom variables
         state.dimensions["nmonths"] = 12
+        state.dimensions["levels"] = 2
         forc_dim = ('xt', 'yt', 'nmonths')
         state.var_meta.update(
             sss_clim=Variable("sss_clim", ("xt", "yt", "nmonths"), "", "", time_dependent=False),
@@ -126,6 +130,7 @@ class GlobalFourDegreeSetup(VerosSetup):
             qnet=Variable("qnet", ("xt", "yt", "nmonths"), "", "", time_dependent=False),
             taux=Variable("taux", ("xt", "yt", "nmonths"), "", "", time_dependent=False),
             tauy=Variable("tauy", ("xt", "yt", "nmonths"), "", "", time_dependent=False),
+            Area=Variable("Sea ice cover fraction", ("xt","yt"), " "),
 
             uWind_f = Variable("Zonal wind velocity", forc_dim, "m/s"),
             vWind_f = Variable("Meridional wind velocity", forc_dim, "m/s"),
@@ -138,13 +143,37 @@ class GlobalFourDegreeSetup(VerosSetup):
             snowfall_f = Variable("Snowfall rate", forc_dim, "m/s"),
             evap_f = Variable("Evaporation", forc_dim, "m"),
             surfPress_f = Variable("Surface pressure", forc_dim, "P"),
-            meanSeaLevelPress_f = Variable("Atmospheric pressure at mean sea level", forc_dim, "P")
+            meanSeaLevelPress_f = Variable("Atmospheric pressure at mean sea level", forc_dim, "P"),
+            longitude=Variable("",("xt",),""),
+            latitude=Variable("",("yt",),""),
+            hyai=Variable("",("zt",),""),
+            hybi=Variable("",("zt",),""),
+            hyam=Variable("",("zt",),""),
+            hybm=Variable("",("zt",),""),
+            lnsp=Variable("",forc_dim,""),
+            ubot=Variable("",forc_dim,""),
+            vbot=Variable("",forc_dim,""),
+            q=Variable("",('xt','yt','levels','nmonths'),""),
+            t=Variable("",('xt','yt','levels','nmonths'),""),
+            qbot=Variable("",forc_dim,""),
+            tbot=Variable("",forc_dim,""),
+            lsm=Variable("",forc_dim,""),
+            sst=Variable("",forc_dim,""),
+            tcc=Variable("",forc_dim,""),
+            swr_net=Variable("",forc_dim,""),
+            lwr_net=Variable("",forc_dim,""),
+            test=Variable("",("zt",),"")
         )
 
     def _read_forcing(self, var):
         with h5netcdf.File(DATA_FILES["forcing"], "r") as infile:
             var_obj = infile.variables[var]
             return npx.array(var_obj).T
+
+    # read netcdf files
+    def read_forcing(self,var,file):
+        with netCDF4.Dataset(PATH + file) as infile:
+            return npx.squeeze(infile[var][:].T)
 
     @veros_routine
     def set_grid(self, state):
@@ -209,6 +238,9 @@ class GlobalFourDegreeSetup(VerosSetup):
             "meanSeaLevelPress_f",
             "evap_f",
             "tau",
+            "Area","time","u","v","tau",
+            "longitude","latitude","hyai","hybi","hyam","hybm","lnsp","ubot","vbot",
+            "q","t","qbot","tbot","lsm","sst","tcc","swr_net","lwr_net",
             # masks and grid
             "maskT","maskU","maskV",
             "iceMask","iceMaskU","iceMaskV","maskInC","maskInU","maskInV",
@@ -218,43 +250,101 @@ class GlobalFourDegreeSetup(VerosSetup):
             "recip_dxC","recip_dyC","recip_dxG","recip_dyG","recip_dxU","recip_dyU","recip_dxV","recip_dyV",
             "area_t","area_u","area_v",
             "rA","rAu","rAv","rAz",
-            "recip_rA","recip_rAu","recip_rAv","recip_rAz"
+            "recip_rA","recip_rAu","recip_rAv","recip_rAz",
+            "test"
         ],
     )
     def set_initial_conditions(self, state):
         vs = state.variables
         settings = state.settings
 
+        # veros and forcing grid
+        t_grid_hor = (vs.xt[2:-2], vs.yt[2:-2], npx.arange(12))
+        xt_forc = npx.array(netCDF4.Dataset(PATH + DATA_ML)['longitude'])
+        yt_forc = npx.array(netCDF4.Dataset(PATH + DATA_ML)['latitude'][::-1])
+        forc_grid_hor = (xt_forc, yt_forc, npx.arange(12))
+
+        # interpolate forcing data to the veros grid
+        def interpolate(forcing):
+            return veros.tools.interpolate(forc_grid_hor, forcing, t_grid_hor)
+
         # initial conditions for T and S
         temp_data = self._read_forcing("temperature")[:, :, ::-1]
-        vs.temp = update(
-            vs.temp, at[2:-2, 2:-2, :, :2], temp_data[:, :, :, npx.newaxis] * vs.maskT[2:-2, 2:-2, :, npx.newaxis]
-        )
+        vs.temp = update(vs.temp, at[2:-2, 2:-2, :, :2], temp_data[:, :, :, npx.newaxis] * vs.maskT[2:-2, 2:-2, :, npx.newaxis])
 
         salt_data = self._read_forcing("salinity")[:, :, ::-1]
-        vs.salt = update(
-            vs.salt, at[2:-2, 2:-2, :, :2], salt_data[..., npx.newaxis] * vs.maskT[2:-2, 2:-2, :, npx.newaxis]
-        )
+        vs.salt = update(vs.salt, at[2:-2, 2:-2, :, :2], salt_data[..., npx.newaxis] * vs.maskT[2:-2, 2:-2, :, npx.newaxis])
 
         # use Trenberth wind stress from MITgcm instead of ECMWF (also contained in ecmwf_4deg.cdf)
         vs.taux = update(vs.taux, at[2:-2, 2:-2, :], self._read_forcing("tau_x"))
         vs.tauy = update(vs.tauy, at[2:-2, 2:-2, :], self._read_forcing("tau_y"))
 
-        # # heat flux
-        # with h5netcdf.File(DATA_FILES["ecmwf"], "r") as ecmwf_data:
-        #     qnec_var = ecmwf_data.variables["Q3"]
-        #     vs.qnec = update(vs.qnec, at[2:-2, 2:-2, :], npx.array(qnec_var).T)
-        #     vs.qnec = npx.where(vs.qnec <= -1e10, 0.0, vs.qnec)
+        if not testNew:
+            # heat flux
+            with h5netcdf.File(DATA_FILES["ecmwf"], "r") as ecmwf_data:
+                qnec_var = ecmwf_data.variables["Q3"]
+                vs.qnec = update(vs.qnec, at[2:-2, 2:-2, :], npx.array(qnec_var).T)
+                vs.qnec = npx.where(vs.qnec <= -1e10, 0.0, vs.qnec)
 
-        # q = self._read_forcing("q_net")
-        # vs.qnet = update(vs.qnet, at[2:-2, 2:-2, :], -q)
-        # vs.qnet = npx.where(vs.qnet <= -1e10, 0.0, vs.qnet)
+            q = self._read_forcing("q_net")
+            vs.qnet = update(vs.qnet, at[2:-2, 2:-2, :], -q)
+            vs.qnet = npx.where(vs.qnet <= -1e10, 0.0, vs.qnet)
 
-        mean_flux = (
-            npx.sum(vs.qnet[2:-2, 2:-2, :] * vs.area_t[2:-2, 2:-2, npx.newaxis]) / 12 / npx.sum(vs.area_t[2:-2, 2:-2])
-        )
-        logger.info(" removing an annual mean heat flux imbalance of %e W/m^2" % mean_flux)
-        vs.qnet = (vs.qnet - mean_flux) * vs.maskT[:, :, -1, npx.newaxis]
+        # interpolate forcing data to the veros grid with levels axis
+        def interpolate_with_levels(forcing):
+            return veros.tools.interpolate(
+                    (xt_forc, yt_forc, [136,137], npx.arange(12)),
+                    forcing,
+                    (vs.xt[2:-2], vs.yt[2:-2], [136,137], npx.arange(12))
+                    )
+
+
+        ################
+
+        if testNew:
+            vs.longitude = update(vs.longitude, at[2:-2],  vs.xt[2:-2])
+            vs.latitude = update(vs.latitude, at[2:-2], vs.yt[2:-2])
+            vs.hyai = update(vs.hyai, at[-3:], self.read_forcing('hyai', DATA_ML)[-3:])
+            vs.hybi = update(vs.hybi, at[-3:], self.read_forcing('hybi', DATA_ML)[-3:])
+            vs.hyam = update(vs.hyam, at[-2:], self.read_forcing('hyam', DATA_ML)[-2:])
+            vs.hybm = update(vs.hybm, at[-2:], self.read_forcing('hybm', DATA_ML)[-2:])
+
+            vs.lnsp = update(vs.lnsp, at[2:-2,2:-2,:], interpolate(self.read_forcing('lnsp', DATA_ML)[..., 0, :]))
+            vs.ubot = update(vs.ubot, at[2:-2,2:-2,:], interpolate(self.read_forcing('u', DATA_ML)[..., 1, :]))
+            vs.vbot = update(vs.vbot, at[2:-2,2:-2,:], interpolate(self.read_forcing('v', DATA_ML)[..., 1, :]))
+
+            vs.q = update(vs.q, at[2:-2,2:-2,:], interpolate_with_levels(self.read_forcing('q', DATA_ML)[..., 1:, :]))
+            vs.t = update(vs.t, at[2:-2,2:-2,:], interpolate_with_levels(self.read_forcing('t', DATA_ML)[..., 1:, :]))
+
+            vs.lsm = update(vs.lsm, at[2:-2,2:-2,:], interpolate(self.read_forcing('lsm', DATA_SFC)))
+            vs.sst = update(vs.sst, at[2:-2,2:-2,:], interpolate(self.read_forcing('sst', DATA_SFC)))
+            vs.tcc = update(vs.tcc, at[2:-2,2:-2,:], interpolate(self.read_forcing('tcc', DATA_SFC)))
+            vs.swr_net = update(vs.swr_net, at[2:-2,2:-2,:], interpolate(self.read_forcing('msnswrf', DATA_SFC)))
+            vs.lwr_net = update(vs.lwr_net, at[2:-2,2:-2,:], interpolate(self.read_forcing('msnlwrf', DATA_SFC)))
+
+
+        ################
+
+        # # surface heat flux
+        # qnet, qnec = heat_flux(state)
+
+        # # veros and forcing grid
+        # t_grid = (vs.xt, vs.yt)
+        # xt_forc = npx.array(netCDF4.Dataset(PATH + DATA_ML)['longitude'])
+        # yt_forc = npx.array(netCDF4.Dataset(PATH + DATA_ML)['latitude'][::-1])
+        # forc_grid = (xt_forc,yt_forc)
+
+        # def interpolate_q(q):
+        #     return veros.tools.interpolate(forc_grid, q, t_grid)
+
+        # vs.qnet = interpolate_q(qnet)
+        # vs.qnec = interpolate_q(qnec)
+
+        # mean_flux = (
+        #     npx.sum(vs.qnet[2:-2, 2:-2, :] * vs.area_t[2:-2, 2:-2, npx.newaxis]) / 12 / npx.sum(vs.area_t[2:-2, 2:-2])
+        # )
+        # logger.info(" removing an annual mean heat flux imbalance of %e W/m^2" % mean_flux)
+        # vs.qnet = (vs.qnet - mean_flux) * vs.maskT[:, :, -1, npx.newaxis]
 
         # SST and SSS
         vs.sst_clim = update(vs.sst_clim, at[2:-2, 2:-2, :], self._read_forcing("sst"))
@@ -268,51 +358,34 @@ class GlobalFourDegreeSetup(VerosSetup):
                 vs.forc_iw_surface, at[2:-2, 2:-2], self._read_forcing("wind_energy") / settings.rho_0 * 0.2
             )
 
-
-        # read netcdf files
-        def read_forcing(var,file):
-            with netCDF4.Dataset(PATH + file) as infile:
-                forcing = npx.squeeze(infile[var][:].T)
-            return forcing
-
-        # veros and forcing grid
-        t_grid_hor = (vs.xt[2:-2], vs.yt[2:-2], npx.arange(12))
-        xt_forc = npx.array(netCDF4.Dataset(PATH + DATA_ML)['longitude'])
-        yt_forc = npx.array(netCDF4.Dataset(PATH + DATA_ML)['latitude'][::-1])
-        forc_grid_hor = (xt_forc, yt_forc, npx.arange(12))
-
-        # interpolate forcing data to the veros grid
-        def interpolate(forcing):
-            return veros.tools.interpolate(forc_grid_hor, forcing, t_grid_hor)
-
         # wind velocities and speed
-        vs.uWind_f = update(vs.uWind_f, at[2:-2,2:-2,:], interpolate(read_forcing('u',DATA_ML)[:,:,1,:]))
-        vs.vWind_f = update(vs.vWind_f, at[2:-2,2:-2,:], interpolate(read_forcing('v',DATA_ML)[:,:,1,:]))
+        vs.uWind_f = update(vs.uWind_f, at[2:-2,2:-2,:], interpolate(self.read_forcing('u',DATA_ML)[:,:,1,:]))
+        vs.vWind_f = update(vs.vWind_f, at[2:-2,2:-2,:], interpolate(self.read_forcing('v',DATA_ML)[:,:,1,:]))
         vs.wSpeed_f = npx.sqrt(vs.uWind_f**2 + vs.vWind_f**2)
 
         # downward shortwave and longwave radiation
-        vs.SWDown_f = update(vs.SWDown_f, at[2:-2,2:-2], interpolate(read_forcing('msdwswrf',DATA_SFC)))
-        vs.LWDown_f = update(vs.LWDown_f, at[2:-2,2:-2], interpolate(read_forcing('msdwlwrf',DATA_SFC)))
+        vs.SWDown_f = update(vs.SWDown_f, at[2:-2,2:-2], interpolate(self.read_forcing('msnswrf',DATA_SFC)))
+        vs.LWDown_f = update(vs.LWDown_f, at[2:-2,2:-2], interpolate(self.read_forcing('msnlwrf',DATA_SFC)))
 
         # atmospheric temperature and specific humidity
-        vs.ATemp_f = update(vs.ATemp_f, at[2:-2,2:-2], interpolate(read_forcing('t',DATA_ML)[:,:,1,:]))
-        vs.aqh_f = update(vs.aqh_f, at[2:-2,2:-2], interpolate(read_forcing('q',DATA_ML)[:,:,1,:]))
+        vs.ATemp_f = update(vs.ATemp_f, at[2:-2,2:-2], interpolate(self.read_forcing('t',DATA_ML)[:,:,1,:]))
+        vs.aqh_f = update(vs.aqh_f, at[2:-2,2:-2], interpolate(self.read_forcing('q',DATA_ML)[:,:,1,:]))
 
         # (convective + large scale) precipitation and snowfall rate (snowfall rate in water equivalent)
         rhoSea = 1026
         vs.precip_f = update(vs.precip_f, at[2:-2,2:-2],
-            ( interpolate(read_forcing('crr',DATA_SFC)) + interpolate(read_forcing('lsrr',DATA_SFC)) ) / rhoSea )
+            ( interpolate(self.read_forcing('crr',DATA_SFC)) + interpolate(self.read_forcing('lsrr',DATA_SFC)) ) / rhoSea )
         vs.snowfall_f = update(vs.snowfall_f, at[2:-2,2:-2],
-            ( interpolate(read_forcing('csfr',DATA_SFC)) + interpolate(read_forcing('lssfr',DATA_SFC)) ) / rhoSea )
+            ( interpolate(self.read_forcing('csfr',DATA_SFC)) + interpolate(self.read_forcing('lssfr',DATA_SFC)) ) / rhoSea )
 
         # evaporation
-        vs.evap_f = update(vs.evap_f, at[2:-2,2:-2], interpolate(read_forcing('e',DATA_SFC)) /  86400 )
+        vs.evap_f = update(vs.evap_f, at[2:-2,2:-2], interpolate(self.read_forcing('e',DATA_SFC)) /  86400 )
 
         # surface pressure
-        vs.surfPress_f = update(vs.surfPress_f, at[2:-2,2:-2], interpolate(read_forcing('sp',DATA_SFC)))
+        vs.surfPress_f = update(vs.surfPress_f, at[2:-2,2:-2], interpolate(self.read_forcing('sp',DATA_SFC)))
 
         # atmospheric pressure at mean sea level
-        vs.meanSeaLevelPress_f = update(vs.meanSeaLevelPress_f, at[2:-2,2:-2], interpolate(read_forcing('msl',DATA_SFC)))
+        vs.meanSeaLevelPress_f = update(vs.meanSeaLevelPress_f, at[2:-2,2:-2], interpolate(self.read_forcing('msl',DATA_SFC)))
 
 
         # copy the veros variables onto the versis ones
@@ -365,7 +438,7 @@ class GlobalFourDegreeSetup(VerosSetup):
     @veros_routine
     def set_diagnostics(self, state):
         settings = state.settings
-        state.diagnostics["snapshot"].output_frequency = 86400.0
+        state.diagnostics["snapshot"].output_frequency = 86400.0 * 5
         state.diagnostics['snapshot'].output_variables += [
             'hIceMean','hSnowMean','Area','TSurf','uIce','vIce','uOcean','vOcean',
             'theta','ocSalt','Qnet','Qsw',
@@ -387,11 +460,11 @@ class GlobalFourDegreeSetup(VerosSetup):
         state.diagnostics["overturning"].output_frequency = 360 * 86400.0
         state.diagnostics["overturning"].sampling_frequency = settings.dt_tracer
         state.diagnostics["energy"].output_frequency = 360 * 86400.0
-        state.diagnostics["energy"].sampling_frequency = 86400
+        state.diagnostics["energy"].sampling_frequency = 86400 * 5
         average_vars = ["temp", "salt", "u", "v", "w", "surface_taux", "surface_tauy", "psi", "hIceMean"]
         state.diagnostics["averages"].output_variables = average_vars
         state.diagnostics["averages"].output_frequency = 86400.0 * 10
-        state.diagnostics["averages"].sampling_frequency = 86400
+        state.diagnostics["averages"].sampling_frequency = 86400 * 5
 
     @veros_routine
     def after_timestep(self, state):
@@ -409,6 +482,9 @@ def set_forcing_kernel(state):
     def current_value(field):
         return f1 * field[:, :, n1] + f2 * field[:, :, n2]
 
+    def current_value4d(field):
+        return f1 * field[:, :, :, n1] + f2 * field[:, :, :, n2]
+
     # wind stress
     vs.surface_taux = current_value(vs.taux)
     vs.surface_tauy = current_value(vs.tauy)
@@ -425,26 +501,112 @@ def set_forcing_kernel(state):
             ** 1.5,
         )
 
-    # surface heat flux
-    qnet, qnec = heat_flux(state,vs.tau)
+    # downward shortwave and longwave radiation
+    vs.SWDown = current_value(vs.SWDown_f)
+    vs.LWDown = current_value(vs.LWDown_f)
 
-    # veros and forcing grid
-    t_grid = (vs.xt, vs.yt)
-    xt_forc = npx.array(netCDF4.Dataset(PATH + DATA_ML)['longitude'])
-    yt_forc = npx.array(netCDF4.Dataset(PATH + DATA_ML)['latitude'][::-1])
-    forc_grid = (xt_forc,yt_forc)
+    ### qnet, qnec
 
-    def interpolate_q(q):
-        return veros.tools.interpolate(forc_grid, q, t_grid)
+    if testNew:
+        lnsp = current_value(vs.lnsp)
+        ubot = current_value(vs.ubot)
+        vbot = current_value(vs.vbot)
+        q = current_value4d(vs.q)
+        t = current_value4d(vs.t)
 
-    qnet = interpolate_q(qnet)
-    qnec = interpolate_q(qnec)
+        qbot = q[..., 0]
+        tbot = t[..., 0]
+        lsm = current_value(vs.lsm)
+        sst = current_value(vs.sst)
+        tcc = current_value(vs.tcc)
+        swr_net = current_value(vs.swr_net)
+        lwr_net = current_value(vs.lwr_net)
+
+        # copy ocean temperature and velocity
+        ts = vs.temp[:,:,-1,vs.tau]
+        u_s = vs.u[:,:,-1,vs.tau]
+        v_s = vs.v[:,:,-1,vs.tau]
+
+        sp = npx.exp(lnsp)
+        ph = get_press_levs(sp, vs.hyai[-3:], vs.hybi[-3:])
+        pf = get_press_levs(sp, vs.hyam[-2:], vs.hybm[-2:])
+        zbot = compute_z_level(t, q, ph)
+
+        # air density
+        rbot = ct.MWDAIR / ct.RGAS * pf[:, :, 0] / tbot[...]
+
+        # potential temperature
+        thbot = (tbot[...] * (ct.P0 / pf[:, :, 0])**ct.CAPPA)
+
+        mask_nan = npx.isnan(ts)
+        mask_ice = npx.zeros(vs.Area.shape)
+        mask_ocn = npx.zeros(lsm.shape)
+
+        ts = update(ts, at[mask_nan], 0)
+        u_s = update(u_s, at[mask_nan], 0)
+        v_s = update(v_s, at[mask_nan], 0)
+
+        # ice mask (1 if there is ice)
+        mask_ice[vs.Area > 0.] = 1
+        # ocean mask (1 in the ocean, 0 on land)
+        mask_ocn[lsm == 0.] = 1
+        # ocean mask without ice (1 in the ocean, 0 on land and if there is ice)
+        mask_ocn_ice = mask_ocn.copy()
+        mask_ocn_ice[vs.Area > 0.] = 0
+
+        atmOcn_fluxes =\
+            dict(zip(('sen', 'lat', 'lwup', 'evap', 'taux', 'tauy', 'tref', 'qref', 'duu10n'),
+                flux_atmOcn(mask_ocn_ice, rbot, zbot, ubot, vbot, qbot, tbot, thbot, u_s, v_s, ts)))
+
+        atmIce_fluxes =\
+            dict(zip(('sen', 'lat', 'lwup', 'evap', 'taux', 'tauy', 'tref', 'qref'),
+                flux_atmIce(mask_ice, rbot, zbot, ubot, vbot, qbot, tbot, thbot, ts)))
+
+        # Net LW radiation flux from sea surface
+        lwnet_ocn = net_lw_ocn(mask_ocn_ice, vs.latitude, qbot, sst, tbot, tcc)
+
+        # Downward LW radiation flux over sea-ice
+        lwdw_ice = dw_lw_ice(mask_ice, tbot, tcc)
+
+        # Net surface radiation flux (without short-wave)
+        qnet = -(swr_net + lwnet_ocn
+            + lwdw_ice + atmIce_fluxes['lwup']
+            + atmIce_fluxes['sen'] + atmOcn_fluxes['sen']
+            + atmIce_fluxes['lat'] + atmOcn_fluxes['lat'])
+
+        dqir_dt, dqh_dt, dqe_dt = dqnetdt(mask_ocn, sp, rbot, sst, ubot, vbot, u_s, v_s)
+
+        qnec = - ( dqir_dt + dqh_dt + dqe_dt )
+
+    else:
+        # veros and forcing grid
+        t_grid = (vs.xt, vs.yt)
+        xt_forc = npx.array(netCDF4.Dataset(PATH + DATA_ML)['longitude'])
+        yt_forc = npx.array(netCDF4.Dataset(PATH + DATA_ML)['latitude'][::-1])
+        forc_grid = (xt_forc, yt_forc)
+
+        # interpolate forcing data to the veros grid
+        def interpolate(forcing):
+            return veros.tools.interpolate(forc_grid, forcing, t_grid)
+
+        qnet, qnec = heat_flux(state)
+
+        qnet = interpolate(qnet)
+        qnec = interpolate(qnec)
+
+    mean_flux = (
+        npx.sum(qnet[2:-2, 2:-2] * vs.area_t[2:-2, 2:-2]) / 12 / npx.sum(vs.area_t[2:-2, 2:-2])
+    )
+    logger.info(" removing an annual mean heat flux imbalance of %e W/m^2" % mean_flux)
+    qnet = (qnet - mean_flux) * vs.maskT[:, :, -1]
+
+
+
+    ###
 
     # heat flux : W/m^2 K kg/J m^3/kg = K m/s
     cp_0 = 3991.86795711963
-    sst = f1 * vs.sst_clim[:, :, n1] + f2 * vs.sst_clim[:, :, n2]
-    # qnec = f1 * vs.qnec[:, :, n1] + f2 * vs.qnec[:, :, n2]
-    # qnet = f1 * vs.qnet[:, :, n1] + f2 * vs.qnet[:, :, n2]
+    sst = current_value(vs.sst_clim)
     vs.forc_temp_surface = (
         (qnet + qnec * (sst - vs.temp[:, :, -1, vs.tau])) * vs.maskT[:, :, -1] / cp_0 / settings.rho_0
     )
@@ -455,15 +617,10 @@ def set_forcing_kernel(state):
     # sss = f1 * vs.sss_clim[:, :, n1] + f2 * vs.sss_clim[:, :, n2]
     # vs.forc_salt_surface = 1.0 / t_rest * (sss - vs.salt[:, :, -1, vs.tau]) * vs.maskT[:, :, -1] * vs.dzt[-1]
 
-
     # wind velocities and speed
     vs.uWind = current_value(vs.uWind_f)
     vs.vWind = current_value(vs.vWind_f)
     vs.wSpeed = npx.sqrt(vs.uWind**2 + vs.vWind**2)
-
-    # downward shortwave and longwave radiation
-    vs.SWDown = current_value(vs.SWDown_f)
-    vs.LWDown = current_value(vs.LWDown_f)
 
     # atmospheric temperature and specific humidity
     vs.ATemp = current_value(vs.ATemp_f)
