@@ -410,7 +410,7 @@ def set_forcing_kernel(state):
         )
 
     # surface heat flux
-    qnet, qnec = heat_flux(state,vs.tau)
+    qnet, qnec = heat_flux(state)
 
     # veros and forcing grid
     t_grid = (vs.xt, vs.yt)
