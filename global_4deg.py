@@ -240,6 +240,22 @@ class GlobalFourDegreeSetup(VerosSetup):
         vs.taux = update(vs.taux, at[2:-2, 2:-2, :], self._read_forcing("tau_x"))
         vs.tauy = update(vs.tauy, at[2:-2, 2:-2, :], self._read_forcing("tau_y"))
 
+        # # heat flux
+        # with h5netcdf.File(DATA_FILES["ecmwf"], "r") as ecmwf_data:
+        #     qnec_var = ecmwf_data.variables["Q3"]
+        #     vs.qnec = update(vs.qnec, at[2:-2, 2:-2, :], npx.array(qnec_var).T)
+        #     vs.qnec = npx.where(vs.qnec <= -1e10, 0.0, vs.qnec)
+
+        # q = self._read_forcing("q_net")
+        # vs.qnet = update(vs.qnet, at[2:-2, 2:-2, :], -q)
+        # vs.qnet = npx.where(vs.qnet <= -1e10, 0.0, vs.qnet)
+
+        mean_flux = (
+            npx.sum(vs.qnet[2:-2, 2:-2, :] * vs.area_t[2:-2, 2:-2, npx.newaxis]) / 12 / npx.sum(vs.area_t[2:-2, 2:-2])
+        )
+        logger.info(" removing an annual mean heat flux imbalance of %e W/m^2" % mean_flux)
+        vs.qnet = (vs.qnet - mean_flux) * vs.maskT[:, :, -1, npx.newaxis]
+
         # SST and SSS
         vs.sst_clim = update(vs.sst_clim, at[2:-2, 2:-2, :], self._read_forcing("sst"))
         vs.sss_clim = update(vs.sss_clim, at[2:-2, 2:-2, :], self._read_forcing("sss"))
@@ -270,8 +286,8 @@ class GlobalFourDegreeSetup(VerosSetup):
             return veros.tools.interpolate(forc_grid_hor, forcing, t_grid_hor)
 
         # wind velocities and speed
-        vs.uWind_f = update(vs.uWind_f, at[2:-2,2:-2,:], interpolate(read_forcing('u',DATA_ML)[:,:,1,:]))
-        vs.vWind_f = update(vs.vWind_f, at[2:-2,2:-2,:], interpolate(read_forcing('v',DATA_ML)[:,:,1,:]))
+        vs.uWind_f = update(vs.uWind_f, at[2:-2,2:-2,:], interpolate(read_forcing('u',DATA_ML)[:,:,2,:]))
+        vs.vWind_f = update(vs.vWind_f, at[2:-2,2:-2,:], interpolate(read_forcing('v',DATA_ML)[:,:,2,:]))
         vs.wSpeed_f = npx.sqrt(vs.uWind_f**2 + vs.vWind_f**2)
 
         # downward shortwave and longwave radiation
@@ -279,8 +295,8 @@ class GlobalFourDegreeSetup(VerosSetup):
         vs.LWDown_f = update(vs.LWDown_f, at[2:-2,2:-2], interpolate(read_forcing('msdwlwrf',DATA_SFC)))
 
         # atmospheric temperature and specific humidity
-        vs.ATemp_f = update(vs.ATemp_f, at[2:-2,2:-2], interpolate(read_forcing('t',DATA_ML)[:,:,1,:]))
-        vs.aqh_f = update(vs.aqh_f, at[2:-2,2:-2], interpolate(read_forcing('q',DATA_ML)[:,:,1,:]))
+        vs.ATemp_f = update(vs.ATemp_f, at[2:-2,2:-2], interpolate(read_forcing('t',DATA_ML)[:,:,2,:]))
+        vs.aqh_f = update(vs.aqh_f, at[2:-2,2:-2], interpolate(read_forcing('q',DATA_ML)[:,:,2,:]))
 
         # (convective + large scale) precipitation and snowfall rate (snowfall rate in water equivalent)
         rhoSea = 1026
@@ -430,12 +446,20 @@ def set_forcing_kernel(state):
     logger.info(" removing an annual mean heat flux imbalance of %e W/m^2" % mean_flux)
     qnet = (qnet - mean_flux) * vs.maskT[:, :, -1]
 
+
     # heat flux : W/m^2 K kg/J m^3/kg = K m/s
     cp_0 = 3991.86795711963
     sst = f1 * vs.sst_clim[:, :, n1] + f2 * vs.sst_clim[:, :, n2]
     vs.forc_temp_surface = (
         (qnet + qnec * (sst - vs.temp[:, :, -1, vs.tau])) * vs.maskT[:, :, -1] / cp_0 / settings.rho_0
     )
+
+    # the saltflux is calculated in the ice model (unfortunately still at the end of the time step)
+    # # salinity restoring
+    # t_rest = 30 * 86400.0
+    # sss = f1 * vs.sss_clim[:, :, n1] + f2 * vs.sss_clim[:, :, n2]
+    # vs.forc_salt_surface = 1.0 / t_rest * (sss - vs.salt[:, :, -1, vs.tau]) * vs.maskT[:, :, -1] * vs.dzt[-1]
+
 
     # wind velocities and speed
     vs.uWind = current_value(vs.uWind_f)
