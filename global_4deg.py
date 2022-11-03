@@ -67,7 +67,7 @@ class GlobalFourDegreeSetup(VerosSetup):
         settings.nx, settings.ny, settings.nz = 90, 40, 15
         settings.dt_mom = 1800.0
         settings.dt_tracer = 86400.0
-        settings.runlen = 86400 * 180
+        settings.runlen = 86400 * 30
 
         settings.x_origin = 4.0
         settings.y_origin = -76.0
@@ -252,11 +252,10 @@ class GlobalFourDegreeSetup(VerosSetup):
                 vs.forc_iw_surface, at[2:-2, 2:-2], self._read_forcing("wind_energy") / settings.rho_0 * 0.2
             )
 
-
         # read netcdf files
         def read_forcing(var,file):
             with netCDF4.Dataset(PATH + file) as infile:
-                forcing = npx.squeeze(infile[var][:].T)
+                forcing = npx.flip(npx.squeeze(infile[var][:].T), axis=1)
             return forcing
 
         # veros and forcing grid
@@ -270,8 +269,8 @@ class GlobalFourDegreeSetup(VerosSetup):
             return veros.tools.interpolate(forc_grid_hor, forcing, t_grid_hor)
 
         # wind velocities and speed
-        vs.uWind_f = update(vs.uWind_f, at[2:-2,2:-2,:], interpolate(read_forcing('u',DATA_ML)[:,:,2,:]))
-        vs.vWind_f = update(vs.vWind_f, at[2:-2,2:-2,:], interpolate(read_forcing('v',DATA_ML)[:,:,2,:]))
+        vs.uWind_f = update(vs.uWind_f, at[2:-2,2:-2,:], interpolate(read_forcing('u',DATA_ML)[:,:,1,:]))
+        vs.vWind_f = update(vs.vWind_f, at[2:-2,2:-2,:], interpolate(read_forcing('v',DATA_ML)[:,:,1,:]))
         vs.wSpeed_f = npx.sqrt(vs.uWind_f**2 + vs.vWind_f**2)
 
         # downward shortwave and longwave radiation
@@ -279,8 +278,8 @@ class GlobalFourDegreeSetup(VerosSetup):
         vs.LWDown_f = update(vs.LWDown_f, at[2:-2,2:-2], interpolate(read_forcing('msdwlwrf',DATA_SFC)))
 
         # atmospheric temperature and specific humidity
-        vs.ATemp_f = update(vs.ATemp_f, at[2:-2,2:-2], interpolate(read_forcing('t',DATA_ML)[:,:,2,:]))
-        vs.aqh_f = update(vs.aqh_f, at[2:-2,2:-2], interpolate(read_forcing('q',DATA_ML)[:,:,2,:]))
+        vs.ATemp_f = update(vs.ATemp_f, at[2:-2,2:-2], interpolate(read_forcing('t',DATA_ML)[:,:,1,:]))
+        vs.aqh_f = update(vs.aqh_f, at[2:-2,2:-2], interpolate(read_forcing('q',DATA_ML)[:,:,1,:]))
 
         # (convective + large scale) precipitation and snowfall rate (snowfall rate in water equivalent)
         rhoSea = 1026
@@ -298,8 +297,7 @@ class GlobalFourDegreeSetup(VerosSetup):
         # atmospheric pressure at mean sea level
         vs.meanSeaLevelPress_f = update(vs.meanSeaLevelPress_f, at[2:-2,2:-2], interpolate(read_forcing('msl',DATA_SFC)))
 
-
-        # copy the veros variables onto the versis ones
+        ### copy the veros variables onto the versis ones
 
         # masks
         vs.iceMask = vs.maskT[:,:,-1]
@@ -436,6 +434,8 @@ def set_forcing_kernel(state):
     vs.forc_temp_surface = (
         (qnet + qnec * (sst - vs.temp[:, :, -1, vs.tau])) * vs.maskT[:, :, -1] / cp_0 / settings.rho_0
     )
+
+    # the salt flux is calculated in the growth routine of versis
 
     # apply simple ice mask
     mask = npx.logical_and(vs.temp[:, :, -1, vs.tau] * vs.maskT[:, :, -1] < -1.8, vs.forc_temp_surface < 0.0)
