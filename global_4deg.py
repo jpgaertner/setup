@@ -437,6 +437,10 @@ def set_forcing_kernel(state):
         (qnet + qnec * (sst - vs.temp[:, :, -1, vs.tau])) * vs.maskT[:, :, -1] / cp_0 / settings.rho_0
     )
 
+    # apply simple ice mask
+    mask = npx.logical_and(vs.temp[:, :, -1, vs.tau] * vs.maskT[:, :, -1] < -1.8, vs.forc_temp_surface < 0.0)
+    vs.forc_temp_surface = npx.where(mask, 0.0, vs.forc_temp_surface)
+    vs.forc_salt_surface = npx.where(mask, 0.0, vs.forc_salt_surface)
 
     # wind velocities and speed
     vs.uWind = current_value(vs.uWind_f)
