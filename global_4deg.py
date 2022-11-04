@@ -437,11 +437,6 @@ def set_forcing_kernel(state):
 
     # the salt flux is calculated in the growth routine of versis
 
-    # apply simple ice mask
-    mask = npx.logical_and(vs.temp[:, :, -1, vs.tau] * vs.maskT[:, :, -1] < -1.8, vs.forc_temp_surface < 0.0)
-    vs.forc_temp_surface = npx.where(mask, 0.0, vs.forc_temp_surface)
-    vs.forc_salt_surface = npx.where(mask, 0.0, vs.forc_salt_surface)
-
     # wind velocities and speed
     vs.uWind = current_value(vs.uWind_f)
     vs.vWind = current_value(vs.vWind_f)
