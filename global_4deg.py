@@ -495,13 +495,14 @@ def set_forcing_kernel(state):
     t = update(t, at[...,1], vs.t_1)
     t = current_value4d(t)
 
+    print('ph',npx.mean(ph[...,0]), npx.mean(ph[...,1]), npx.mean(ph[...,2]))
     zbot = compute_z_level(t, q, ph)
     
     # air density
-    rbot = current_value(ct.MWDAIR / ct.RGAS * vs.pf / vs.ATemp_f)
+    rbot = current_value(ct.MWDAIR / ct.RGAS * vs.pf[2:-2,2:-2] / vs.ATemp_f[2:-2,2:-2])
 
     # potential temperature
-    thbot = current_value(vs.ATemp_f * (ct.P0 / vs.pf)**ct.CAPPA)
+    thbot = current_value(vs.ATemp_f[2:-2,2:-2] * (ct.P0 / vs.pf[2:-2,2:-2])**ct.CAPPA)
 
     t_surf = vs.temp[:,:,-1,vs.tau]
     u_surf = vs.u[:,:,-1,vs.tau]
@@ -529,6 +530,10 @@ def set_forcing_kernel(state):
     mask_ocn = current_value(mask_ocn)
     mask_ocn_ice = current_value(mask_ocn_ice)
 
+    print('ice', npx.round(npx.mean(mask_ice[2:-2,2:-2]),1),npx.round(npx.mean(rbot[2:-2,2:-2]),1),npx.round(npx.mean(zbot[2:-2,2:-2]),1),
+    npx.round(npx.mean(vs.uWind[2:-2,2:-2]),1),npx.round(npx.mean(vs.vWind[2:-2,2:-2]),1),npx.round(npx.mean(vs.aqh[2:-2,2:-2]),1),
+    npx.round(npx.mean(vs.ATemp[2:-2,2:-2]),1),npx.round(npx.mean(thbot[2:-2,2:-2]),1),npx.round(npx.min(t_surf[2:-2,2:-2]),1))
+
     sen_oc, lat_oc, lwup_oc, evap_oc, taux_oc, tauy_oc, tref_oc, qref_oc, duu10n_oc = \
         flux_atmOcn(mask_ocn_ice, rbot, zbot, vs.uWind, vs.vWind, vs.aqh, vs.ATemp, thbot, u_surf, v_surf, t_surf)
 
@@ -554,9 +559,9 @@ def set_forcing_kernel(state):
 
     qnec = - ( dqir_dt + dqh_dt + dqe_dt )
 
-    print('test', npx.mean(current_value(vs.swr_net)), npx.mean(lwnet_ocn),
-        npx.mean(lwdw_ice), npx.mean(lwup_ice), npx.mean(sen_ice),
-        npx.mean(sen_oc), npx.mean(lat_ice), npx.mean(lat_oc))
+    print('test', npx.mean(current_value(vs.swr_net[2:-2,2:-2])), npx.mean(lwnet_ocn[2:-2,2:-2]),
+        npx.mean(lwdw_ice[2:-2,2:-2]), npx.mean(lwup_ice[2:-2,2:-2]), npx.mean(sen_ice[2:-2,2:-2]),
+        npx.mean(sen_oc[2:-2,2:-2]), npx.mean(lat_ice[2:-2,2:-2]), npx.mean(lat_oc[2:-2,2:-2]))
     # # surface heat flux
     # qnet, qnec = heat_flux(state)
 
