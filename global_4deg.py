@@ -534,29 +534,33 @@ def set_forcing_kernel(state):
     npx.round(npx.mean(vs.ATemp[2:-2,2:-2]),1),npx.round(npx.mean(thbot[2:-2,2:-2]),1),npx.round(npx.min(t_surf[2:-2,2:-2]),1))
 
     sen_oc, lat_oc, lwup_oc, evap_oc, taux_oc, tauy_oc, tref_oc, qref_oc, duu10n_oc = \
-        flux_atmOcn(mask_ocn_ice, rbot, zbot, vs.uWind, vs.vWind, vs.aqh, vs.ATemp, thbot, u_surf, v_surf, t_surf)
+        flux_atmOcn(mask_ocn_ice[2:-2,2:-2], rbot, zbot, vs.uWind[2:-2,2:-2], vs.vWind[2:-2,2:-2], vs.aqh[2:-2,2:-2], vs.ATemp[2:-2,2:-2],
+            thbot, u_surf[2:-2,2:-2], v_surf[2:-2,2:-2], t_surf[2:-2,2:-2])
 
     sen_ice, lat_ice, lwup_ice, evap_ice, taux_ice, tauy_ice, tref_ice, qref_ice = \
-        flux_atmIce(mask_ice, rbot, zbot, vs.uWind, vs.vWind, vs.aqh, vs.ATemp, thbot, t_surf)
+        flux_atmIce(mask_ice[2:-2,2:-2], rbot, zbot, vs.uWind[2:-2,2:-2], vs.vWind[2:-2,2:-2],
+        vs.aqh[2:-2,2:-2], vs.ATemp[2:-2,2:-2], thbot, t_surf[2:-2,2:-2])
 
     # Net LW radiation flux from sea surface
-    lwnet_ocn = net_lw_ocn(mask_ocn_ice, vs.yt, vs.aqh, current_value(vs.sst), vs.ATemp, current_value(vs.tcc))
+    lwnet_ocn = net_lw_ocn(mask_ocn_ice[2:-2,2:-2], vs.yt[2:-2], vs.aqh[2:-2,2:-2], current_value(vs.sst)[2:-2,2:-2], vs.ATemp[2:-2,2:-2], current_value(vs.tcc)[2:-2,2:-2])
 
     # Downward LW radiation flux over sea-ice
-    lwdw_ice = dw_lw_ice(mask_ice, vs.ATemp, current_value(vs.tcc))
+    lwdw_ice = dw_lw_ice(mask_ice[2:-2,2:-2], vs.ATemp[2:-2,2:-2], current_value(vs.tcc)[2:-2,2:-2])
 
     # Net surface radiation flux (without short-wave)
     qnet = npx.zeros_like(vs.ATemp)
     qnet = update(qnet, at[2:-2,2:-2],
-        -(current_value(vs.swr_net)[2:-2,2:-2] + lwnet_ocn[2:-2,2:-2]
-        + lwdw_ice[2:-2,2:-2] + lwup_ice[2:-2,2:-2]
-        + sen_ice[2:-2,2:-2] + sen_oc[2:-2,2:-2]
-        + lat_ice[2:-2,2:-2] + lat_oc[2:-2,2:-2]))
+        -(current_value(vs.swr_net)[2:-2,2:-2] + lwnet_ocn
+        + lwdw_ice + lwup_ice
+        + sen_ice + sen_oc
+        + lat_ice + lat_oc))
 
-    dqir_dt, dqh_dt, dqe_dt = dqnetdt(mask_ocn, current_value(vs.sp), rbot, current_value(vs.sst),
-        vs.uWind, vs.vWind, u_surf, v_surf)
+    dqir_dt, dqh_dt, dqe_dt = dqnetdt(mask_ocn[2:-2,2:-2], current_value(vs.sp)[2:-2,2:-2], rbot, current_value(vs.sst)[2:-2,2:-2],
+        vs.uWind[2:-2,2:-2], vs.vWind[2:-2,2:-2], u_surf[2:-2,2:-2], v_surf[2:-2,2:-2])
 
-    qnec = - ( dqir_dt + dqh_dt + dqe_dt )
+    qnec = npx.zeros_like(vs.ATemp)
+    qnec = update(qnec, at[2:-2,2:-2],
+            - ( dqir_dt + dqh_dt + dqe_dt ))
 
     print('test', npx.mean(current_value(vs.swr_net[2:-2,2:-2])), npx.mean(lwnet_ocn[2:-2,2:-2]),
         npx.mean(lwdw_ice[2:-2,2:-2]), npx.mean(lwup_ice[2:-2,2:-2]), npx.mean(sen_ice[2:-2,2:-2]),
