@@ -542,17 +542,21 @@ def set_forcing_kernel(state):
     lwdw_ice = dw_lw_ice(mask_ice, vs.ATemp, current_value(vs.tcc))
 
     # Net surface radiation flux (without short-wave)
-    qnet = -(current_value(vs.swr_net) + lwnet_ocn
-        + lwdw_ice + lwup_ice
-        + sen_ice + sen_oc
-        + lat_ice + lat_oc)
+    qnet = npx.zeros_like(vs.ATemp)
+    qnet = update(qnet, at[2:-2,2:-2],
+        -(current_value(vs.swr_net)[2:-2,2:-2] + lwnet_ocn[2:-2,2:-2]
+        + lwdw_ice[2:-2,2:-2] + lwup_ice[2:-2,2:-2]
+        + sen_ice[2:-2,2:-2] + sen_oc[2:-2,2:-2]
+        + lat_ice[2:-2,2:-2] + lat_oc[2:-2,2:-2]))
 
     dqir_dt, dqh_dt, dqe_dt = dqnetdt(mask_ocn, current_value(vs.sp), rbot, current_value(vs.sst),
         vs.uWind, vs.vWind, u_surf, v_surf)
 
     qnec = - ( dqir_dt + dqh_dt + dqe_dt )
 
-
+    print('test', npx.mean(current_value(vs.swr_net)), npx.mean(lwnet_ocn),
+        npx.mean(lwdw_ice), npx.mean(lwup_ice), npx.mean(sen_ice),
+        npx.mean(sen_oc), npx.mean(lat_ice), npx.mean(lat_oc))
     # # surface heat flux
     # qnet, qnec = heat_flux(state)
 
