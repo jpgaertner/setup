@@ -317,8 +317,8 @@ class GlobalFourDegreeSetup(VerosSetup):
         def interpolate_hor(forcing):
             return veros.tools.interpolate(forc_grid_hor, forcing, t_grid_hor)
 
-        longitude = read_forcing_levels('longitude',DATA_ML)
-        latitude = read_forcing_levels('latitude',DATA_ML)
+        # longitude = read_forcing_levels('longitude',DATA_ML)
+        # latitude = read_forcing_levels('latitude',DATA_ML)
         hyai = read_forcing_levels('hyai',DATA_ML)[-3:] # hybrid A coefficient at layer interfaces [Pa]
         hybi = read_forcing_levels('hybi',DATA_ML)[-3:] # hybrid B coefficient at layer interfaces [1]
         hyam = read_forcing_levels('hyam',DATA_ML)[-2:] # hybrid A coefficient at layer midpoints [Pa]
@@ -329,10 +329,10 @@ class GlobalFourDegreeSetup(VerosSetup):
         vbot = read_forcing('v',DATA_ML)[..., 1, :] # v component of wind [m/s]
         q = read_forcing('q',DATA_ML)[..., 1:, :] # air specific humidity [kg/kg]
         t = read_forcing('t',DATA_ML)[..., 1:, :] # air temperature [K]
-        q_0 = q[...,0,:]
-        q_1 = q[...,1,:]
-        t_0 = t[...,0,:]
-        t_1 = t[...,1,:]
+        vs.q_0 = update(vs.q_0, at[2:-2,2:-2], interpolate(q[...,0,:]))
+        vs.q_1 = update(vs.q_1, at[2:-2,2:-2], interpolate(q[...,1,:]))
+        vs.t_0 = update(vs.t_0, at[2:-2,2:-2], interpolate(t[...,0,:]))
+        vs.t_1 = update(vs.t_1, at[2:-2,2:-2], interpolate(t[...,1,:]))
 
         # use the current value function later in the forcing_kernel
         qbot = q[..., 0,:]
@@ -486,17 +486,17 @@ def set_forcing_kernel(state):
     ph = current_value4d(ph)
 
     q = npx.ones((*vs.q_0.shape,2))
-    q[...,0] = vs.q_0
-    q[...,1] = vs.q_1
+    q = update(q, at[...,0], vs.q_0)
+    q = update(q, at[...,1], vs.q_1)
     q = current_value4d(q)
 
     t = npx.ones((*vs.t_0.shape,2))
-    t[...,0] = vs.t_0
-    t[...,1] = vs.t_1
+    t = update(t, at[...,0], vs.t_0)
+    t = update(t, at[...,1], vs.t_1)
     t = current_value4d(t)
 
     zbot = compute_z_level(t, q, ph)
-
+    
     # air density
     rbot = current_value(ct.MWDAIR / ct.RGAS * vs.pf / vs.ATemp_f)
 
