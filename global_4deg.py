@@ -510,7 +510,7 @@ def set_forcing_kernel(state):
     mask_nan = npx.isnan(t_surf)
     # the ice mask is applied in the set_forcing_kernel function in the setup file
     # here it is set to zero everywhere (i.e. there is no ice)
-    mask_ice = npx.zeros(vs.lsm.shape)
+    mask_ice = npx.zeros(vs.lsm.shape) #use vs.Area > 0
     mask_ocn = npx.zeros(vs.lsm.shape)
 
     t_surf = update(t_surf, at[mask_nan], 0)
@@ -529,13 +529,11 @@ def set_forcing_kernel(state):
     mask_ocn = current_value(mask_ocn)
     mask_ocn_ice = current_value(mask_ocn_ice)
 
-    atmOcn_fluxes =\
-        dict(zip(('sen', 'lat', 'lwup', 'evap', 'taux', 'tauy', 'tref', 'qref', 'duu10n'),
-            flux_atmOcn(mask_ocn_ice, rbot, zbot, vs.uWind, vs.vWind, vs.aqh, vs.ATemp, thbot, u_surf, v_surf, t_surf)))
+    sen_oc, lat_oc, lwup_oc, evap_oc, taux_oc, tauy_oc, tref_oc, qref_oc, duu10n_oc = \
+        flux_atmOcn(mask_ocn_ice, rbot, zbot, vs.uWind, vs.vWind, vs.aqh, vs.ATemp, thbot, u_surf, v_surf, t_surf)
 
-    atmIce_fluxes =\
-        dict(zip(('sen', 'lat', 'lwup', 'evap', 'taux', 'tauy', 'tref', 'qref'),
-            flux_atmIce(mask_ice, rbot, zbot, vs.uWind, vs.vWind, vs.aqh, vs.ATemp, thbot, t_surf)))
+    sen_ice, lat_ice, lwup_ice, evap_ice, taux_ice, tauy_ice, tref_ice, qref_ice = \
+        flux_atmIce(mask_ice, rbot, zbot, vs.uWind, vs.vWind, vs.aqh, vs.ATemp, thbot, t_surf)
 
     # Net LW radiation flux from sea surface
     lwnet_ocn = net_lw_ocn(mask_ocn_ice, vs.yt, vs.aqh, current_value(vs.sst), vs.ATemp, current_value(vs.tcc))
@@ -545,9 +543,9 @@ def set_forcing_kernel(state):
 
     # Net surface radiation flux (without short-wave)
     qnet = -(current_value(vs.swr_net) + lwnet_ocn
-        + lwdw_ice + atmIce_fluxes['lwup']
-        + atmIce_fluxes['sen'] + atmOcn_fluxes['sen']
-        + atmIce_fluxes['lat'] + atmOcn_fluxes['lat'])
+        + lwdw_ice + lwup_ice
+        + sen_ice + sen_oc
+        + lat_ice + lat_oc)
 
     dqir_dt, dqh_dt, dqe_dt = dqnetdt(mask_ocn, current_value(vs.sp), rbot, current_value(vs.sst),
         vs.uWind, vs.vWind, u_surf, v_surf)
