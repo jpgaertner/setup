@@ -495,8 +495,7 @@ def set_forcing_kernel(state):
     t = update(t, at[...,1], vs.t_1)
     t = current_value4d(t)
 
-    print('ph',npx.mean(ph[...,0]), npx.mean(ph[...,1]), npx.mean(ph[...,2]))
-    zbot = compute_z_level(t, q, ph)
+    zbot = compute_z_level(t[2:-2,2:-2], q[2:-2,2:-2], ph[2:-2,2:-2])
     
     # air density
     rbot = current_value(ct.MWDAIR / ct.RGAS * vs.pf[2:-2,2:-2] / vs.ATemp_f[2:-2,2:-2])
