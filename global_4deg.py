@@ -307,7 +307,7 @@ class GlobalFourDegreeSetup(VerosSetup):
         # this function is used for variables that only have a levels dimension (horizontally uniform)
         def read_forcing_levels(var,file):
             with netCDF4.Dataset(PATH + file) as infile:
-                forcing = npx.flip(npx.squeeze(infile[var][:].T))
+                forcing = npx.squeeze(infile[var][:].T)
             return forcing
 
         t_grid_hor = (vs.xt[2:-2], vs.yt[2:-2])
