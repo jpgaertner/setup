@@ -61,7 +61,7 @@ class GlobalFourDegreeSetup(VerosSetup):
     min_depth = 10.0
     max_depth = 5400.0
 
-    fine_z = True # flag for using a finer vertical resolution
+    fine_z = False # flag for using a finer vertical resolution
 
     @veros_routine
     def set_parameter(self, state):
@@ -159,7 +159,13 @@ class GlobalFourDegreeSetup(VerosSetup):
     def set_grid(self, state):
         vs = state.variables
         settings = state.settings
-        vs.dzt = veros.tools.get_vinokur_grid_steps(settings.nz, self.max_depth, self.min_depth, refine_towards='lower')
+        if self.fine_z:
+            vs.dzt = veros.tools.get_vinokur_grid_steps(settings.nz, self.max_depth, self.min_depth, refine_towards='lower')
+        else:
+            ddz = npx.array(
+            [50.0, 70.0, 100.0, 140.0, 190.0, 240.0, 290.0, 340.0, 390.0, 440.0, 490.0, 540.0, 590.0, 640.0, 690.0]
+            )
+            vs.dzt = ddz[::-1]
         vs.dxt = 4.0 * npx.ones_like(vs.dxt)
         vs.dyt = 4.0 * npx.ones_like(vs.dyt)
 
