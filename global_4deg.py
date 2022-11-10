@@ -61,16 +61,22 @@ class GlobalFourDegreeSetup(VerosSetup):
     min_depth = 10.0
     max_depth = 5400.0
 
+    fine_z = True # flag for using a finer vertical resolution
+
     @veros_routine
     def set_parameter(self, state):
         settings = state.settings
 
         settings.identifier = "4deg"
 
-        settings.nx, settings.ny, settings.nz = 90, 40, 40
+        settings.nx, settings.ny = 90, 40
+        if self.fine_z:
+            settings.nz = 40
+        else:
+            settings.nz = 15
         settings.dt_mom = 1800.0
         settings.dt_tracer = 86400.0
-        settings.runlen = 86400 * 30
+        settings.runlen = 86400 * 180
 
         settings.x_origin = 4.0
         settings.y_origin = -76.0
@@ -165,7 +171,7 @@ class GlobalFourDegreeSetup(VerosSetup):
             vs.coriolis_t, at[...], 2 * settings.omega * npx.sin(vs.yt[npx.newaxis, :] / 180.0 * settings.pi)
         )
 
-    @veros_routine(dist_safe=False, local_variables=["kbot", "zt"])
+    @veros_routine(dist_safe=False, local_variables=["kbot", "xt", "yt", "zt"])
     def set_topography(self, state):
         vs = state.variables
         settings = state.settings
@@ -175,8 +181,12 @@ class GlobalFourDegreeSetup(VerosSetup):
         zt_forc = self._read_forcing("zt")[::-1]
         salt_interp = veros.tools.interpolate((vs.xt[2:-2], vs.yt[2:-2], zt_forc), salt_data,
                                                 (vs.xt[2:-2], vs.yt[2:-2], vs.zt), kind="nearest")
+        if self.fine_z:
+            salt = salt_interp
+        else:
+            salt = salt_data
 
-        land_mask = (vs.zt[npx.newaxis, npx.newaxis, :] <= bathymetry_data[..., npx.newaxis]) | (salt_interp == 0.0)
+        land_mask = (vs.zt[npx.newaxis, npx.newaxis, :] <= bathymetry_data[..., npx.newaxis]) | (salt == 0.0)
 
         vs.kbot = update(vs.kbot, at[2:-2, 2:-2], 1 + npx.sum(land_mask.astype("int"), axis=2))
 
@@ -231,21 +241,33 @@ class GlobalFourDegreeSetup(VerosSetup):
         vs = state.variables
         settings = state.settings
 
+        # vertical dimension of the forcing grid
         zt_forc = self._read_forcing("zt")[::-1]
+
+        # use this function to interpolate intitial conditions with x,y, and z dimension (no time dimension) 
+        def interpolate_z(data):
+            return veros.tools.interpolate((vs.xt[2:-2], vs.yt[2:-2], zt_forc), data,
+                                                (vs.xt[2:-2], vs.yt[2:-2], vs.zt), kind="nearest")
 
         # initial conditions for T and S
         temp_data = self._read_forcing("temperature")[:, :, ::-1]
-        temp_interp = veros.tools.interpolate((vs.xt[2:-2], vs.yt[2:-2], zt_forc), temp_data,
-                                                (vs.xt[2:-2], vs.yt[2:-2], vs.zt), kind="nearest")
+        temp_interp = interpolate_z(temp_data)
+        if self.fine_z:
+            temp = temp_interp
+        else:
+            temp = temp_data
         vs.temp = update(
-            vs.temp, at[2:-2, 2:-2, :, :2], temp_interp[:, :, :, npx.newaxis] * vs.maskT[2:-2, 2:-2, :, npx.newaxis]
+            vs.temp, at[2:-2, 2:-2, :, :2], temp[:, :, :, npx.newaxis] * vs.maskT[2:-2, 2:-2, :, npx.newaxis]
         )
 
         salt_data = self._read_forcing("salinity")[:, :, ::-1]
-        salt_interp = veros.tools.interpolate((vs.xt[2:-2], vs.yt[2:-2], zt_forc), salt_data,
-                                                (vs.xt[2:-2], vs.yt[2:-2], vs.zt), kind="nearest")
+        salt_interp = interpolate_z(salt_data)
+        if self.fine_z:
+            salt = salt_interp
+        else:
+            salt = salt_data
         vs.salt = update(
-            vs.salt, at[2:-2, 2:-2, :, :2], salt_interp[..., npx.newaxis] * vs.maskT[2:-2, 2:-2, :, npx.newaxis]
+            vs.salt, at[2:-2, 2:-2, :, :2], salt[..., npx.newaxis] * vs.maskT[2:-2, 2:-2, :, npx.newaxis]
         )
 
         # use Trenberth wind stress from MITgcm instead of ECMWF (also contained in ecmwf_4deg.cdf)
