@@ -17,6 +17,7 @@ if __name__ == "__main__":
 # -- end of auto-generated header, original file below --
 
 import os
+from pickle import FALSE
 import h5netcdf
 import netCDF4
 
@@ -76,7 +77,7 @@ class GlobalFourDegreeSetup(VerosSetup):
             settings.nz = 15
         settings.dt_mom = 1800.0
         settings.dt_tracer = 86400.0
-        settings.runlen = 86400 * 180
+        settings.runlen = 86400 * 150
 
         settings.x_origin = 4.0
         settings.y_origin = -76.0
@@ -90,6 +91,8 @@ class GlobalFourDegreeSetup(VerosSetup):
         settings.iso_dslope = 4.0 / 1000.0
         settings.iso_slopec = 1.0 / 1000.0
         settings.enable_skew_diffusion = True
+
+        settings.K_gm_0 = 500.0
 
         settings.enable_hor_friction = True
         settings.A_h = (4 * settings.degtom) ** 3 * 2e-11
@@ -105,10 +108,10 @@ class GlobalFourDegreeSetup(VerosSetup):
         settings.tke_mxl_choice = 2
         settings.kappaM_min = 2e-4
         settings.kappaH_min = 2e-5
-        settings.enable_kappaH_profile = True
+        settings.enable_kappaH_profile = False
         settings.enable_tke_superbee_advection = True
 
-        settings.enable_eke = True
+        settings.enable_eke = False # can only be false if K_gm_0 != 0
         settings.eke_k_max = 1e4
         settings.eke_c_k = 0.4
         settings.eke_c_eps = 0.5
@@ -131,8 +134,6 @@ class GlobalFourDegreeSetup(VerosSetup):
         state.var_meta.update(
             sss_clim=Variable("sss_clim", ("xt", "yt", "nmonths"), "", "", time_dependent=False),
             sst_clim=Variable("sst_clim", ("xt", "yt", "nmonths"), "", "", time_dependent=False),
-            qnec=Variable("qnec", ("xt", "yt", "nmonths"), "", "", time_dependent=False),
-            qnet=Variable("qnet", ("xt", "yt", "nmonths"), "", "", time_dependent=False),
             taux=Variable("taux", ("xt", "yt", "nmonths"), "", "", time_dependent=False),
             tauy=Variable("tauy", ("xt", "yt", "nmonths"), "", "", time_dependent=False),
 
@@ -147,7 +148,18 @@ class GlobalFourDegreeSetup(VerosSetup):
             snowfall_f = Variable("Snowfall rate", forc_dim, "m/s"),
             evap_f = Variable("Evaporation", forc_dim, "m"),
             surfPress_f = Variable("Surface pressure", forc_dim, "P"),
-            meanSeaLevelPress_f = Variable("Atmospheric pressure at mean sea level", forc_dim, "P")
+            meanSeaLevelPress_f = Variable("Atmospheric pressure at mean sea level", forc_dim, "P"),
+            forc_save = Variable('forc temp surface after the veros time step', ('xt', 'yt'), ' '),
+            swr_dw = Variable(' ', ('xt','yt'), ' '),
+            swr_net = Variable(' ', ('xt','yt'), ' '),
+            lwr_dw = Variable(' ', ('xt','yt'), ' '),
+            lwr_net = Variable(' ', ('xt','yt'), ' '),
+            sen_ice = Variable(' ', ('xt','yt'), ' '),
+            sen_oc = Variable(' ', ('xt','yt'), ' '),
+            lat_ice = Variable(' ', ('xt','yt'), ' '),
+            lat_oc = Variable(' ', ('xt','yt'), ' '),
+            qnet = Variable('', ('xt','yt'),''),
+            qnec = Variable('', ('xt','yt'),'')
         )
 
     def _read_forcing(self, var):
@@ -205,8 +217,6 @@ class GlobalFourDegreeSetup(VerosSetup):
         local_variables=[
             "taux",
             "tauy",
-            "qnec",
-            "qnet",
             "sss_clim",
             "sst_clim",
             "temp",
@@ -398,6 +408,10 @@ class GlobalFourDegreeSetup(VerosSetup):
             'forc_salt_surface','saltflux','EmPmR',
             'ssh_an','psi','dpsi',
             'os_hIceMean','os_hSnowMean',
+            'forc_save',
+            'swr_dw','swr_net','lwr_dw','lwr_net',
+            'sen_ice','sen_oc','lat_ice','lat_oc',
+            'qnet',
             #TODO remove this
             'F_lh','F_lwu','F_sens','q_s','LWDown','SWDown','F_ia_net','F_io_net', 'F_oi',
             'IceGrowthRateMixedLayer','dhIceMean_dt','dArea_dt','dArea_oiFlux','dArea_oaFlux','dArea_iaFlux',
@@ -448,10 +462,10 @@ def set_forcing_kernel(state):
         )
 
     # surface heat flux
-    qnet, qnec = heat_flux(state)
+    qnet, qnec, swr_dw, swr_net, lwr_dw, lwr_net, sen_ice, sen_oc, lat_ice, lat_oc = heat_flux(state)
 
     # veros and forcing grid
-    t_grid = (vs.xt, vs.yt)
+    t_grid = (vs.xt[2:-2], vs.yt[2:-2])
     xt_forc = npx.array(netCDF4.Dataset(PATH + DATA_ML)['longitude'])
     yt_forc = npx.array(netCDF4.Dataset(PATH + DATA_ML)['latitude'][::-1])
     forc_grid = (xt_forc,yt_forc)
@@ -459,21 +473,35 @@ def set_forcing_kernel(state):
     def interpolate_q(q):
         return veros.tools.interpolate(forc_grid, q, t_grid)
 
-    qnet = interpolate_q(qnet)
-    qnec = interpolate_q(qnec)
+    vs.swr_dw = update(vs.swr_dw ,at[2:-2,2:-2], interpolate_q(swr_dw))
+    vs.swr_net = update(vs.swr_net ,at[2:-2,2:-2], interpolate_q(swr_net))
+    vs.lwr_dw = update(vs.lwr_dw ,at[2:-2,2:-2], interpolate_q(lwr_dw))
+    vs.lwr_net = update(vs.lwr_net ,at[2:-2,2:-2], interpolate_q(lwr_net))
+    vs.sen_ice = update(vs.sen_ice ,at[2:-2,2:-2], interpolate_q(sen_ice))
+    vs.sen_oc = update(vs.sen_oc ,at[2:-2,2:-2], interpolate_q(sen_oc))
+    vs.lat_ice = update(vs.lat_ice ,at[2:-2,2:-2], interpolate_q(lat_ice))
+    vs.lat_oc = update(vs.lat_oc ,at[2:-2,2:-2], interpolate_q(lat_oc))
+
+    vs.qnet = update(vs.qnet, at[2:-2,2:-2], interpolate_q(qnet))
+    vs.qnec = update(vs.qnec, at[2:-2,2:-2], interpolate_q(qnec))
 
     mean_flux = (
-        npx.sum(qnet[2:-2, 2:-2] * vs.area_t[2:-2, 2:-2]) / 12 / npx.sum(vs.area_t[2:-2, 2:-2])
+        npx.sum(vs.qnet[2:-2, 2:-2] * vs.area_t[2:-2, 2:-2]) / 12 / npx.sum(vs.area_t[2:-2, 2:-2])
     )
     logger.info(" removing an annual mean heat flux imbalance of %e W/m^2" % mean_flux)
-    qnet = (qnet - mean_flux) * vs.maskT[:, :, -1]
+    vs.qnet = (vs.qnet - mean_flux) * vs.maskT[:, :, -1]
+
+
+    vs.forc_save = vs.forc_temp_surface
 
     # heat flux : W/m^2 K kg/J m^3/kg = K m/s
     cp_0 = 3991.86795711963
     sst = f1 * vs.sst_clim[:, :, n1] + f2 * vs.sst_clim[:, :, n2]
     vs.forc_temp_surface = (
-        (qnet + qnec * (sst - vs.temp[:, :, -1, vs.tau])) * vs.maskT[:, :, -1] / cp_0 / settings.rho_0
+        (vs.qnet + vs.qnec * (sst - vs.temp[:, :, -1, vs.tau])) * vs.maskT[:, :, -1] / cp_0 / settings.rho_0
     )
+
+    # vs.forc_temp_surface = update(vs.forc_temp_surface, at[:,:], -3e-5)
 
     # the salt flux is calculated in the growth routine of versis
 
@@ -508,6 +536,11 @@ def set_forcing_kernel(state):
 
 
     return KernelOutput(
+        qnet = vs.qnet,
+        sen_ice = vs.sen_ice,
+        sen_oc = vs.sen_oc,
+        lat_ice = vs.lat_ice,
+        lat_oc = vs.lat_oc,
         surface_taux=vs.surface_taux,
         surface_tauy=vs.surface_tauy,
         forc_tke_surface=vs.forc_tke_surface,
