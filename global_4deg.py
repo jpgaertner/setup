@@ -159,7 +159,10 @@ class GlobalFourDegreeSetup(VerosSetup):
             lat_ice = Variable(' ', ('xt','yt'), ' '),
             lat_oc = Variable(' ', ('xt','yt'), ' '),
             qnet = Variable('', ('xt','yt'),''),
-            qnec = Variable('', ('xt','yt'),'')
+            qnec = Variable('', ('xt','yt'),''),
+            tstar = Variable('', ('xt','yt'),''),
+            ustar = Variable('', ('xt','yt'),''),
+            qstar = Variable('', ('xt','yt'),'')
         )
 
     def _read_forcing(self, var):
@@ -411,7 +414,7 @@ class GlobalFourDegreeSetup(VerosSetup):
             'forc_save',
             'swr_dw','swr_net','lwr_dw','lwr_net',
             'sen_ice','sen_oc','lat_ice','lat_oc',
-            'qnet',
+            'qnet','tstar','ustar','qstar',
             #TODO remove this
             'F_lh','F_lwu','F_sens','q_s','LWDown','SWDown','F_ia_net','F_io_net', 'F_oi',
             'IceGrowthRateMixedLayer','dhIceMean_dt','dArea_dt','dArea_oiFlux','dArea_oaFlux','dArea_iaFlux',
@@ -462,7 +465,7 @@ def set_forcing_kernel(state):
         )
 
     # surface heat flux
-    qnet, qnec, swr_dw, swr_net, lwr_dw, lwr_net, sen_ice, sen_oc, lat_ice, lat_oc = heat_flux(state)
+    qnet, qnec, swr_dw, swr_net, lwr_dw, lwr_net, sen_ice, sen_oc, lat_ice, lat_oc, ustar, tstar, qstar = heat_flux(state)
 
     # veros and forcing grid
     t_grid = (vs.xt[2:-2], vs.yt[2:-2])
@@ -473,6 +476,9 @@ def set_forcing_kernel(state):
     def interpolate_q(q):
         return veros.tools.interpolate(forc_grid, q, t_grid)
 
+    vs.ustar = update(vs.ustar ,at[2:-2,2:-2], interpolate_q(ustar))
+    vs.tstar = update(vs.tstar ,at[2:-2,2:-2], interpolate_q(tstar))
+    vs.qstar = update(vs.qstar ,at[2:-2,2:-2], interpolate_q(qstar))
     vs.swr_dw = update(vs.swr_dw ,at[2:-2,2:-2], interpolate_q(swr_dw))
     vs.swr_net = update(vs.swr_net ,at[2:-2,2:-2], interpolate_q(swr_net))
     vs.lwr_dw = update(vs.lwr_dw ,at[2:-2,2:-2], interpolate_q(lwr_dw))
@@ -536,7 +542,14 @@ def set_forcing_kernel(state):
 
 
     return KernelOutput(
+        ustar = vs.ustar,
+        tstar = vs.tstar,
+        qstar = vs.qstar,
         qnet = vs.qnet,
+        swr_net = vs.swr_net,
+        swr_dw = vs.swr_dw,
+        lwr_net = vs.lwr_net,
+        lwr_dw = vs.lwr_dw,
         sen_ice = vs.sen_ice,
         sen_oc = vs.sen_oc,
         lat_ice = vs.lat_ice,
