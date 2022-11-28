@@ -522,22 +522,22 @@ def set_forcing_kernel(state):
     # ocean mask without ice (1 on the ocean, 0 on land and if there is ice)
     mask_ocn_ice = vs.mask_ocn
 
-    sen_oc, lat_oc, lwup_oc, evap_oc, taux_oc, tauy_oc, tref_oc, qref_oc, duu10n_oc, ustar, tstar, qstar = \
-        flux_atmOcn(mask_ocn_ice, rbot, zbot, vs.uWind, vs.vWind, vs.aqh, vs.ATemp,
+    # Net surface radiation flux
+    use_simple_qnet = False
+    if use_simple_qnet:
+        qir, qh, qe = flux_atmOcnIce(vs.mask_ocn, current_value(vs.sp), vs.aqh, rbot, vs.uWind, vs.vWind, vs.ATemp, u_surf, v_surf, t_surf)
+        qnet = SWnet + qir + vs.LWDown + qh + qe
+    else:
+        sen_oc, lat_oc, lwup_oc, evap_oc, taux_oc, tauy_oc, tref_oc, qref_oc, duu10n_oc, ustar, tstar, qstar = \
+            flux_atmOcn(mask_ocn_ice, rbot, zbot, vs.uWind, vs.vWind, vs.aqh, vs.ATemp,
             thbot, u_surf, v_surf, t_surf)
 
-    sen_ice, lat_ice, lwup_ice, evap_ice, taux_ice, tauy_ice, tref_ice, qref_ice = \
-        flux_atmIce(mask_ice, rbot, zbot, vs.uWind, vs.vWind,
-        vs.aqh, vs.ATemp, thbot, t_surf)
+        sen_ice, lat_ice, lwup_ice, evap_ice, taux_ice, tauy_ice, tref_ice, qref_ice = \
+            flux_atmIce(mask_ice, rbot, zbot, vs.uWind, vs.vWind,vs.aqh, vs.ATemp, thbot, t_surf)
 
-    qir, qh, qe = flux_atmOcnIce(vs.mask_ocn, current_value(vs.sp), vs.aqh, rbot, vs.uWind, vs.vWind, vs.ATemp, u_surf, v_surf, t_surf)
-    qnet_simple = SWnet + qir + vs.LWDown + qh + qe 
-
-    # Net surface radiation flux
-    qnet = ( SWnet + LWnet
+        qnet = ( SWnet + LWnet
                 + sen_ice + lat_ice
                 + sen_oc + lat_oc)
-    qnet = qnet_simple
 
     sp = current_value(vs.sp)
     sst = current_value(vs.sst_f)
@@ -586,9 +586,9 @@ def set_forcing_kernel(state):
 
     return KernelOutput(
         mask_ocn_ice = mask_ocn_ice,
-        ustar = ustar,
-        tstar = tstar,
-        qstar = qstar,
+        # ustar = ustar,
+        # tstar = tstar,
+        # qstar = qstar,
         zbot = zbot,
         rbot = rbot,
         thbot = thbot,
