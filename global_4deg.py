@@ -40,7 +40,6 @@ from versis.flux_atmOcn_atmIce import flux_atmIce, flux_atmOcn, flux_atmOcnIce
 from versis.utilities import *
 import versis.constants as ct
 
-
 class GlobalFourDegreeSetup(VerosSetup):
 
     __veros_plugins__ = (versis,)
@@ -79,7 +78,7 @@ class GlobalFourDegreeSetup(VerosSetup):
             settings.nz = 15
         settings.dt_mom = 1800.0
         settings.dt_tracer = 86400.0
-        settings.runlen = 86400 * 150
+        settings.runlen = 86400 * 180
 
         settings.x_origin = 4.0
         settings.y_origin = -76.0
@@ -110,10 +109,10 @@ class GlobalFourDegreeSetup(VerosSetup):
         settings.tke_mxl_choice = 2
         settings.kappaM_min = 2e-4
         settings.kappaH_min = 2e-5
-        settings.enable_kappaH_profile = False
+        settings.enable_kappaH_profile = True
         settings.enable_tke_superbee_advection = True
 
-        settings.enable_eke = False # can only be false if K_gm_0 != 0
+        settings.enable_eke = True # can only be false if K_gm_0 != 0
         settings.eke_k_max = 1e4
         settings.eke_c_k = 0.4
         settings.eke_c_eps = 0.5
@@ -178,7 +177,14 @@ class GlobalFourDegreeSetup(VerosSetup):
             lat_ice = Variable(" ", hor_dim, " "),
             sen_oc = Variable(" ", hor_dim, " "),
             lat_oc = Variable(" ", hor_dim, " "),
-            mask_ocn_ice = Variable(" ", hor_dim, " ")
+            mask_ocn_ice = Variable(" ", hor_dim, " "),
+            qnet_imp = Variable(" ", hor_dim, ""),
+            qnet_split = Variable("",hor_dim,""),
+            qnet_simple = Variable("",hor_dim,""),
+            qnec = Variable(" ", hor_dim, ""),
+            lwup_oc = Variable(" ", hor_dim, ""),
+            lwup_ice = Variable(" ", hor_dim, ""),
+            SWnet = Variable(" ", hor_dim, "")
         )
 
     def _read_forcing(self, var):
@@ -385,15 +391,10 @@ class GlobalFourDegreeSetup(VerosSetup):
         vs.t_0 = update(vs.t_0, at[2:-2,2:-2], interpolate(t[...,0,:]))
         vs.t_1 = update(vs.t_1, at[2:-2,2:-2], interpolate(t[...,1,:]))
 
-        vs.lsm = update(vs.lsm, at[2:-2,2:-2], interpolate_hor(read_forcing('lsm', DATA_SFC)[:,:,0])) # land sea mask (1 on land, 0 on the ocean)
-        vs.mask_ocn = update(vs.mask_ocn, at[vs.lsm==0], 1)
-
         # mean surface net shortwave and longwave radiation flux [W/m2]
         vs.SWnet_f = update(vs.SWnet_f, at[2:-2,2:-2], interpolate(read_forcing('msnswrf', DATA_SFC)))
         vs.LWnet_f = update(vs.LWnet_f, at[2:-2,2:-2], interpolate(read_forcing('msnlwrf', DATA_SFC)))
 
-        # sea surface temperature [K]
-        vs.sst_f = update(vs.sst_f, at[2:-2,2:-2], interpolate(read_forcing('sst', DATA_SFC)))
 
         for i in range(12):
 
@@ -402,6 +403,7 @@ class GlobalFourDegreeSetup(VerosSetup):
             vs.ph_2 = update(vs.ph_2, at[...,i], get_press_levs(vs.sp[...,i],hyai,hybi)[:,:,2])
             vs.pf = update(vs.pf, at[...,i], get_press_levs(vs.sp[...,i],hyam,hybm)[:,:,0])
 
+        vs.mask_ocn = vs.maskT[:,:,-1]
 
         ### copy the veros variables onto the versis ones
 
@@ -464,7 +466,8 @@ class GlobalFourDegreeSetup(VerosSetup):
             'forc_salt_surface','saltflux','EmPmR',
             'ssh_an','psi','dpsi',
             'ustar','tstar','qstar','zbot','qnet','rbot','thbot',
-            'sen_ice','lat_ice','sen_oc','lat_oc','mask_ocn_ice'
+            'sen_ice','lat_ice','sen_oc','lat_oc','mask_ocn_ice','qnet_imp','qnet_split','qnet_simple','qnec',
+            'lwup_oc','lwup_ice','SWnet'
             ]
         state.diagnostics["overturning"].output_frequency = 360 * 86400.0
         state.diagnostics["overturning"].sampling_frequency = settings.dt_tracer
@@ -520,6 +523,10 @@ def set_forcing_kernel(state):
     SWnet = current_value(vs.SWnet_f)
     LWnet = current_value(vs.LWnet_f)
 
+    # downward shortwave and longwave radiation
+    vs.SWDown = current_value(vs.SWDown_f)
+    vs.LWDown = current_value(vs.LWDown_f)
+
     ### surface heat flux
 
     def current_value4d(field):
@@ -553,35 +560,41 @@ def set_forcing_kernel(state):
     u_surf = vs.u[:,:,-1,vs.tau]
     v_surf = vs.v[:,:,-1,vs.tau]
 
+    mask_ice = npx.where(vs.Area > 0.5, 1, 0)
 
-    mask_ice = npx.zeros_like(vs.mask_ocn) # TODO no ice, use vs.Area > 0 when adding the ice model
     # ocean mask without ice (1 on the ocean, 0 on land and if there is ice)
     mask_ocn_ice = vs.mask_ocn
+    mask_ocn_ice = npx.where(vs.Area > 0.5, 0, mask_ocn_ice)
+
 
     # Net surface radiation flux
-    use_simple_qnet = False
-    if use_simple_qnet:
-        qir, qh, qe = flux_atmOcnIce(vs.mask_ocn, current_value(vs.sp), vs.aqh, rbot, vs.uWind, vs.vWind, vs.ATemp, u_surf, v_surf, t_surf)
-        qnet = SWnet + qir + vs.LWDown + qh + qe
-    else:
-        sen_oc, lat_oc, lwup_oc, evap_oc, taux_oc, tauy_oc, tref_oc, qref_oc, duu10n_oc, ustar, tstar, qstar = \
-            flux_atmOcn(mask_ocn_ice, rbot, zbot, vs.uWind, vs.vWind, vs.aqh, vs.ATemp,
-            thbot, u_surf, v_surf, t_surf)
+    qir, qh, qe = flux_atmOcnIce(vs.mask_ocn, current_value(vs.sp), vs.aqh, rbot, vs.uWind, vs.vWind, vs.ATemp, u_surf, v_surf, t_surf)
+    qnet_simple = SWnet + qir + vs.LWDown + qh + qe
 
-        sen_ice, lat_ice, lwup_ice, evap_ice, taux_ice, tauy_ice, tref_ice, qref_ice = \
-            flux_atmIce(mask_ice, rbot, zbot, vs.uWind, vs.vWind,vs.aqh, vs.ATemp, thbot, t_surf)
+    sen_oc, lat_oc, lwup_oc, evap_oc, taux_oc, tauy_oc, tref_oc, qref_oc, duu10n_oc, ustar, tstar, qstar = \
+        flux_atmOcn(mask_ocn_ice, rbot, zbot, vs.uWind, vs.vWind, vs.aqh, vs.ATemp,
+        thbot, u_surf, v_surf, t_surf)
 
-        qnet = ( SWnet + LWnet
-                + sen_ice + lat_ice
-                + sen_oc + lat_oc)
+    sen_ice, lat_ice, lwup_ice, evap_ice, taux_ice, tauy_ice, tref_ice, qref_ice = \
+        flux_atmIce(mask_ice, rbot, zbot, vs.uWind, vs.vWind,vs.aqh, vs.ATemp, thbot, vs.TSurf)
+
+    qnet = ( SWnet + vs.LWDown
+            + lwup_oc + lwup_ice
+            + sen_ice + lat_ice
+            + sen_oc + lat_oc )
 
     sp = current_value(vs.sp)
-    sst = current_value(vs.sst_f)
 
-    dqir_dt, dqh_dt, dqe_dt = dqnetdt(vs.mask_ocn, sp, rbot, sst,
+    # set the surface temperature to ice temperature where there is ice
+    t_surf = npx.where(vs.Area > 0.5, vs.TSurf, t_surf)
+
+    dqir_dt, dqh_dt, dqe_dt = dqnetdt(vs.mask_ocn, sp, rbot, t_surf,
         vs.uWind, vs.vWind, u_surf, v_surf)
 
     qnec = - ( dqir_dt + dqh_dt + dqe_dt )
+
+    qnet_split = qnet
+    qnec_split = qnec
 
     mean_flux = (
         npx.sum(vs.qnet[2:-2, 2:-2] * vs.area_t[2:-2, 2:-2]) / 12 / npx.sum(vs.area_t[2:-2, 2:-2])
@@ -589,6 +602,27 @@ def set_forcing_kernel(state):
 
     # logger.info(" removing an annual mean heat flux imbalance of %e W/m^2" % mean_flux)
     qnet = (qnet - mean_flux) * vs.maskT[:, :, -1]
+
+    # # surface heat flux
+    # qnet, qnec = heat_flux(state)
+    # # veros and forcing grid
+    # t_grid = (vs.xt, vs.yt)
+    # xt_forc = npx.array(netCDF4.Dataset(PATH + DATA_ML)['longitude'])
+    # yt_forc = npx.array(netCDF4.Dataset(PATH + DATA_ML)['latitude'][::-1])
+    # forc_grid = (xt_forc,yt_forc)
+    # def interpolate_q(q):
+    #     return veros.tools.interpolate(forc_grid, q, t_grid)
+    # qnet = interpolate_q(qnet)
+    # qnec = interpolate_q(qnec)
+
+
+    qnet = npx.zeros_like(vs.qnet)
+    qnec = npx.zeros_like(vs.qnet)
+    qnet = update(qnet, at[2:-2,2:-2], qnet_split[2:-2,2:-2])
+    qnec = update(qnec, at[2:-2,2:-2], qnec_split[2:-2,2:-2])
+
+    qnet_imp = qnet
+
 
     # heat flux : W/m^2 K kg/J m^3/kg = K m/s
     cp_0 = 3991.86795711963
@@ -598,10 +632,6 @@ def set_forcing_kernel(state):
     )
 
     # the salt flux is calculated in the growth routine of versis
-
-    # downward shortwave and longwave radiation
-    vs.SWDown = current_value(vs.SWDown_f)
-    vs.LWDown = current_value(vs.LWDown_f)
 
     # (convective + large scale) precipitation and snowfall rate (snowfall rate in water equivalent)
     vs.precip = current_value(vs.precip_f)
@@ -619,20 +649,26 @@ def set_forcing_kernel(state):
     meanSeaLevelPress = current_value(vs.meanSeaLevelPress_f)
     vs.ssh_an = ( meanSeaLevelPress - vs.surfPress ) / ( rhoSea * gravity )
 
-
     return KernelOutput(
+        qnet_simple = qnet_simple,
+        qnet_imp = qnet_imp,
+        qnet_split = qnet_split,
         mask_ocn_ice = mask_ocn_ice,
-        # ustar = ustar,
-        # tstar = tstar,
-        # qstar = qstar,
+        ustar = ustar,
+        tstar = tstar,
+        qstar = qstar,
         zbot = zbot,
         rbot = rbot,
         thbot = thbot,
         qnet = qnet,
+        qnec = qnec,
+        SWnet = SWnet,
         sen_ice = sen_ice,
         lat_ice = lat_ice,
         sen_oc = sen_oc,
         lat_oc = lat_oc,
+        lwup_oc = lwup_oc,
+        lwup_ice = lwup_ice,
         surface_taux=vs.surface_taux,
         surface_tauy=vs.surface_tauy,
         forc_tke_surface=vs.forc_tke_surface,
